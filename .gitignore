@@ -8,6 +8,8 @@ __pycache__/
 
 # 本地环境变量与密钥
 .env
+# 部署用临时令牌，使用后立即删除
+.deploy-token
 
 # 编辑器配置
 .idea/
