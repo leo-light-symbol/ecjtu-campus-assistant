@@ -10,6 +10,7 @@ __pycache__/
 .env
 # 部署用临时令牌，使用后立即删除
 .deploy-token
+.render-token
 
 # 编辑器配置
 .idea/
