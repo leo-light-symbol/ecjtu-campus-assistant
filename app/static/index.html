@@ -1,0 +1,1183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="华东交通大学校内信息聚合 RAG 智能问答平台">
+    <meta name="theme-color" content="#07110f">
+    <title>交大校园百事通</title>
+
+    <!-- Leaflet 与 Tailwind 样式均通过 CDN 引入，无需构建即可运行。 -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        campus: {
+                            50: "#ecfdf5",
+                            300: "#6ee7b7",
+                            400: "#34d399",
+                            500: "#10b981",
+                            600: "#059669",
+                            900: "#064e3b"
+                        },
+                        night: {
+                            800: "#101c19",
+                            850: "#0c1714",
+                            900: "#07110f",
+                            950: "#040b09"
+                        }
+                    },
+                    fontFamily: {
+                        sans: ["Inter", "PingFang SC", "Microsoft YaHei", "system-ui", "sans-serif"]
+                    },
+                    boxShadow: {
+                        glow: "0 0 32px rgba(16, 185, 129, 0.12)"
+                    }
+                }
+            }
+        };
+    </script>
+
+    <style>
+        /* 页面背景、滚动条与 Markdown 等 Tailwind 之外的补充样式。 */
+        body {
+            background:
+                radial-gradient(circle at 12% 0%, rgba(16, 185, 129, 0.09), transparent 30%),
+                radial-gradient(circle at 92% 88%, rgba(5, 150, 105, 0.07), transparent 28%),
+                #07110f;
+        }
+
+        .background-grid {
+            background-image:
+                linear-gradient(rgba(52, 211, 153, 0.025) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(52, 211, 153, 0.025) 1px, transparent 1px);
+            background-size: 36px 36px;
+            mask-image: linear-gradient(to bottom, black, transparent 90%);
+        }
+
+        .glass-panel {
+            background: linear-gradient(145deg, rgba(16, 28, 25, 0.96), rgba(8, 20, 16, 0.94));
+            border: 1px solid rgba(110, 231, 183, 0.1);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+        }
+
+        .quick-card {
+            position: relative;
+            overflow: hidden;
+            transition: border-color 180ms ease, background-color 180ms ease, transform 180ms ease;
+        }
+
+        .quick-card::after {
+            position: absolute;
+            right: -24px;
+            bottom: -34px;
+            width: 80px;
+            height: 80px;
+            border-radius: 9999px;
+            background: rgba(16, 185, 129, 0.06);
+            content: "";
+            transition: transform 180ms ease;
+        }
+
+        .quick-card:hover {
+            transform: translateY(-2px);
+            border-color: rgba(52, 211, 153, 0.32);
+            background-color: rgba(16, 185, 129, 0.055);
+        }
+
+        .quick-card:hover::after { transform: scale(1.35); }
+        .quick-card:disabled { cursor: not-allowed; opacity: 0.55; transform: none; }
+
+        .message-enter { animation: message-in 240ms ease-out both; }
+
+        @keyframes message-in {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .loading-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 9999px;
+            background: #34d399;
+            animation: loading-bounce 1.2s infinite ease-in-out;
+        }
+
+        .loading-dot:nth-child(2) { animation-delay: 140ms; }
+        .loading-dot:nth-child(3) { animation-delay: 280ms; }
+
+        @keyframes loading-bounce {
+            0%, 60%, 100% { opacity: 0.35; transform: translateY(0); }
+            30% { opacity: 1; transform: translateY(-4px); }
+        }
+
+        .markdown-body {
+            color: #d1ddd8;
+            font-size: 0.925rem;
+            line-height: 1.8;
+            overflow-wrap: anywhere;
+        }
+
+        .markdown-body > :first-child { margin-top: 0; }
+        .markdown-body > :last-child { margin-bottom: 0; }
+        .markdown-body p { margin: 0.6rem 0; }
+        .markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4 {
+            margin: 1rem 0 0.45rem;
+            color: #ecfdf5;
+            font-weight: 650;
+            line-height: 1.45;
+        }
+        .markdown-body h1 { font-size: 1.2rem; }
+        .markdown-body h2 { font-size: 1.1rem; }
+        .markdown-body h3, .markdown-body h4 { font-size: 1rem; }
+        .markdown-body strong { color: #ecfdf5; font-weight: 650; }
+        .markdown-body ul, .markdown-body ol { margin: 0.6rem 0; padding-left: 1.35rem; }
+        .markdown-body ul { list-style: disc; }
+        .markdown-body ol { list-style: decimal; }
+        .markdown-body li { margin: 0.25rem 0; padding-left: 0.15rem; }
+        .markdown-body li::marker { color: #34d399; }
+        .markdown-body a { color: #6ee7b7; text-decoration: underline; text-underline-offset: 3px; }
+        .markdown-body blockquote {
+            margin: 0.75rem 0;
+            padding: 0.35rem 0.85rem;
+            border-left: 3px solid #10b981;
+            background: rgba(16, 185, 129, 0.06);
+            color: #a8bdb4;
+        }
+        .markdown-body code {
+            padding: 0.12rem 0.35rem;
+            border: 1px solid rgba(110, 231, 183, 0.12);
+            border-radius: 0.3rem;
+            background: rgba(0, 0, 0, 0.25);
+            color: #6ee7b7;
+            font-size: 0.85em;
+        }
+        .markdown-body pre {
+            margin: 0.75rem 0;
+            padding: 0.85rem;
+            overflow-x: auto;
+            border: 1px solid rgba(110, 231, 183, 0.12);
+            border-radius: 0.65rem;
+            background: #040b09;
+        }
+        .markdown-body pre code { padding: 0; border: 0; background: transparent; }
+        .markdown-body table { width: 100%; margin: 0.75rem 0; border-collapse: collapse; }
+        .markdown-body th, .markdown-body td {
+            padding: 0.5rem 0.65rem;
+            border: 1px solid rgba(110, 231, 183, 0.14);
+            text-align: left;
+        }
+        .markdown-body th { background: rgba(16, 185, 129, 0.08); color: #ecfdf5; }
+        .markdown-body hr { margin: 1rem 0; border-color: rgba(110, 231, 183, 0.14); }
+
+        .scrollbar-thin { scrollbar-width: thin; scrollbar-color: #234a3b transparent; }
+        .scrollbar-thin::-webkit-scrollbar { width: 5px; height: 5px; }
+        .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+        .scrollbar-thin::-webkit-scrollbar-thumb { background: #234a3b; border-radius: 999px; }
+
+        textarea { field-sizing: content; }
+        textarea:focus, button:focus-visible, summary:focus-visible, input:focus-visible {
+            outline: 2px solid rgba(52, 211, 153, 0.65);
+            outline-offset: 2px;
+        }
+
+        /* 标签页与地图标记 */
+        [hidden] { display: none !important; }
+        .tab-button { color: #64748b; transition: color 180ms ease, background-color 180ms ease; }
+        .tab-button:hover { color: #d1ddd8; }
+        .tab-button[aria-selected="true"] {
+            color: #6ee7b7;
+            background: rgba(16, 185, 129, 0.1);
+            box-shadow: inset 0 0 0 1px rgba(52, 211, 153, 0.14);
+        }
+
+        #campus-map { background: #0b1713; }
+        .leaflet-container { font: inherit; }
+        .leaflet-control-zoom {
+            overflow: hidden;
+            border: 1px solid rgba(110, 231, 183, 0.2) !important;
+            border-radius: 10px !important;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25) !important;
+        }
+        .leaflet-control-zoom a {
+            border-color: rgba(110, 231, 183, 0.12) !important;
+            background: #0c1714 !important;
+            color: #6ee7b7 !important;
+        }
+        .leaflet-control-zoom a:hover { background: #153228 !important; }
+        .leaflet-control-attribution { background: rgba(4, 11, 9, 0.78) !important; color: #64748b !important; }
+        .leaflet-control-attribution a { color: #6ee7b7 !important; }
+        .leaflet-popup-content-wrapper {
+            border: 1px solid rgba(110, 231, 183, 0.18);
+            border-radius: 14px;
+            background: #0c1714;
+            color: #d1ddd8;
+            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.38);
+        }
+        .leaflet-popup-content { margin: 16px; min-width: 210px; max-width: 280px; line-height: 1.6; }
+        .leaflet-popup-tip { background: #0c1714; }
+        .leaflet-popup-close-button { color: #6ee7b7 !important; }
+
+        .campus-div-icon { background: transparent; border: 0; }
+        .marker-pin {
+            position: relative;
+            display: flex;
+            width: 38px;
+            height: 38px;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid rgba(255, 255, 255, 0.82);
+            border-radius: 50% 50% 50% 8px;
+            background: var(--marker-color);
+            color: white;
+            box-shadow: 0 5px 14px rgba(0, 0, 0, 0.38);
+            transform: rotate(-45deg);
+            transition: filter 180ms ease, scale 180ms ease;
+        }
+        .marker-pin svg { width: 19px; height: 19px; transform: rotate(45deg); }
+        .marker-highlight .marker-pin {
+            filter: brightness(1.16);
+            scale: 1.22;
+            animation: marker-pulse 1.4s ease-in-out infinite;
+        }
+        @keyframes marker-pulse {
+            0%, 100% { box-shadow: 0 5px 14px rgba(0, 0, 0, 0.38), 0 0 0 0 var(--marker-color); }
+            50% { box-shadow: 0 5px 14px rgba(0, 0, 0, 0.38), 0 0 0 10px transparent; }
+        }
+
+        #map-card:fullscreen, #map-card.map-fullscreen-fallback {
+            width: 100vw;
+            height: 100dvh;
+            border-radius: 0;
+            background: #07110f;
+        }
+        #map-card.map-fullscreen-fallback { position: fixed; inset: 0; z-index: 9999; }
+
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+        }
+    </style>
+</head>
+<body class="min-h-screen font-sans text-slate-200 antialiased lg:h-screen lg:overflow-hidden">
+    <div class="background-grid pointer-events-none fixed inset-0" aria-hidden="true"></div>
+
+    <!-- 顶部品牌导航 -->
+    <header class="relative z-10 border-b border-campus-300/10 bg-night-900/80 backdrop-blur-xl">
+        <div class="mx-auto flex h-16 max-w-[1600px] items-center justify-between px-4 sm:h-[72px] sm:px-6">
+            <a href="/" class="flex items-center gap-3" aria-label="交大校园百事通首页">
+                <span class="flex h-10 w-10 items-center justify-center rounded-xl border border-campus-300/25 bg-campus-500/10 text-campus-400 shadow-glow">
+                    <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                        <path d="m3 9 9-5 9 5-9 5-9-5Z" stroke-linejoin="round"/>
+                        <path d="M7 11.5V16c2.8 2.3 7.2 2.3 10 0v-4.5M21 9v6" stroke-linecap="round"/>
+                    </svg>
+                </span>
+                <span>
+                    <span class="block text-base font-semibold tracking-wide text-campus-50 sm:text-lg">交大校园百事通</span>
+                    <span class="hidden text-[11px] tracking-[0.16em] text-slate-500 sm:block">ECJTU CAMPUS ASSISTANT</span>
+                </span>
+            </a>
+            <div class="flex items-center gap-2 rounded-full border border-campus-300/10 bg-campus-500/5 px-3 py-1.5 text-xs text-slate-400">
+                <span class="h-1.5 w-1.5 rounded-full bg-campus-400 shadow-[0_0_8px_#34d399]"></span>
+                <span>华东交通大学</span>
+                <span class="hidden text-slate-600 sm:inline">·</span>
+                <span class="hidden sm:inline">校内智能服务</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- AI 问答与校园地图标签页 -->
+    <nav class="relative z-10 border-b border-campus-300/[0.07] bg-night-950/30" aria-label="主要功能">
+        <div class="mx-auto flex h-12 max-w-[1600px] items-center px-4 sm:px-6">
+            <div class="flex items-center gap-1 rounded-xl bg-black/10 p-1" role="tablist" aria-label="校园服务标签页">
+                <button id="chat-tab" type="button" role="tab" aria-selected="true" aria-controls="chat-panel" data-tab="chat" class="tab-button flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium">
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M21 12a8 8 0 0 1-8 8H5l-3 2 1-5a9 9 0 1 1 18-5Z" stroke-linejoin="round"/></svg>
+                    AI 问答
+                </button>
+                <button id="map-tab" type="button" role="tab" aria-selected="false" aria-controls="map-panel" data-tab="map" tabindex="-1" class="tab-button flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium">
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m9 18-6 3V6l6-3 6 3 6-3v15l-6 3-6-3Z" stroke-linejoin="round"/><path d="M9 3v15M15 6v15"/></svg>
+                    校园地图
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 桌面端左右 2:1 布局，移动端自动切换为上下布局。 -->
+    <main id="chat-panel" role="tabpanel" aria-labelledby="chat-tab" class="relative z-[1] mx-auto grid w-full max-w-[1600px] gap-4 p-4 sm:gap-5 sm:p-6 lg:h-[calc(100%-120px)] lg:min-h-0 lg:grid-cols-3">
+        <!-- AI 问答区 -->
+        <section class="glass-panel flex h-[calc(100dvh-9rem)] min-h-[560px] flex-col overflow-hidden rounded-2xl shadow-glow lg:col-span-2 lg:h-auto lg:min-h-0" aria-label="AI 校园问答">
+            <div class="flex items-center justify-between border-b border-campus-300/[0.08] px-4 py-4 sm:px-6">
+                <div class="flex items-center gap-3">
+                    <span class="relative flex h-9 w-9 items-center justify-center rounded-lg bg-campus-500/10 text-campus-400">
+                        <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                            <path d="M12 3 9.8 8.2 4 10l5.8 1.8L12 17l2.2-5.2L20 10l-5.8-1.8L12 3Z" stroke-linejoin="round"/>
+                            <path d="m5 16-.9 2.1L2 19l2.1.9L5 22l.9-2.1L8 19l-2.1-.9L5 16Z" stroke-linejoin="round"/>
+                        </svg>
+                    </span>
+                    <div>
+                        <h1 class="text-sm font-semibold text-campus-50 sm:text-base">AI 校园助手</h1>
+                        <p class="mt-0.5 text-xs text-slate-500">基于校内资料检索，为你解答校园问题</p>
+                    </div>
+                </div>
+                <span class="hidden items-center gap-1.5 rounded-md border border-campus-300/10 px-2.5 py-1 text-[11px] text-campus-300/80 sm:flex">
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V4H6.5A2.5 2.5 0 0 0 4 6.5v13Z" stroke-linejoin="round"/>
+                        <path d="M8 8h8M8 12h6" stroke-linecap="round"/>
+                    </svg>
+                    RAG 知识库
+                </span>
+            </div>
+
+            <!-- 消息列表仅追加文本或经过消毒的 HTML，避免接口内容造成脚本注入。 -->
+            <div id="chat-messages" class="scrollbar-thin flex-1 space-y-6 overflow-y-auto px-4 py-5 sm:px-6 sm:py-6" role="log" aria-live="polite" aria-label="问答消息记录">
+                <article class="message-enter flex gap-3">
+                    <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-campus-300/15 bg-campus-500/10 text-campus-400">
+                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                            <path d="M12 3 9.8 8.2 4 10l5.8 1.8L12 17l2.2-5.2L20 10l-5.8-1.8L12 3Z" stroke-linejoin="round"/>
+                        </svg>
+                    </div>
+                    <div class="max-w-[88%] sm:max-w-[82%]">
+                        <div class="rounded-2xl rounded-tl-md border border-campus-300/[0.08] bg-white/[0.035] px-4 py-3.5">
+                            <div class="markdown-body">
+                                <p><strong>你好，我是交大校园百事通。</strong></p>
+                                <p>你可以向我咨询校园政策、新生入学、场馆开放等问题，我会根据校内知识库为你查找答案。</p>
+                            </div>
+                        </div>
+                        <div class="mt-3 flex flex-wrap gap-2">
+                            <button type="button" data-question="新生报到需要准备哪些材料？" class="rounded-full border border-campus-300/15 bg-campus-500/[0.04] px-3 py-1.5 text-xs text-slate-400 transition hover:border-campus-300/30 hover:text-campus-300">新生报到材料</button>
+                            <button type="button" data-question="学校图书馆的开放时间是什么？" class="rounded-full border border-campus-300/15 bg-campus-500/[0.04] px-3 py-1.5 text-xs text-slate-400 transition hover:border-campus-300/30 hover:text-campus-300">图书馆开放时间</button>
+                        </div>
+                    </div>
+                </article>
+            </div>
+
+            <!-- 底部输入区 -->
+            <div class="border-t border-campus-300/[0.08] bg-night-950/35 p-3 sm:p-4">
+                <form id="question-form" class="rounded-xl border border-campus-300/15 bg-night-950/70 p-2 transition focus-within:border-campus-400/45 focus-within:shadow-[0_0_0_3px_rgba(16,185,129,0.05)]">
+                    <label for="question-input" class="sr-only">输入你的校园问题</label>
+                    <textarea id="question-input" rows="1" maxlength="2000" placeholder="输入你的校园问题，例如：图书馆几点关门？" class="scrollbar-thin block max-h-36 min-h-[42px] w-full resize-none bg-transparent px-2.5 py-2 text-sm leading-6 text-slate-200 placeholder:text-slate-600 focus:outline-none" required></textarea>
+                    <div class="flex items-center justify-between px-1.5 pb-0.5 pt-1">
+                        <p class="text-[11px] text-slate-600"><kbd class="font-sans">Enter</kbd> 发送 · <kbd class="font-sans">Shift + Enter</kbd> 换行</p>
+                        <div class="flex items-center gap-3">
+                            <span id="character-count" class="hidden text-[11px] text-slate-600 sm:inline">0 / 2000</span>
+                            <button id="send-button" type="submit" class="flex h-9 items-center gap-2 rounded-lg bg-campus-500 px-3.5 text-sm font-medium text-night-950 transition hover:bg-campus-400 disabled:cursor-not-allowed disabled:opacity-50" aria-label="发送问题">
+                                <span>发送</span>
+                                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                    <path d="m22 2-7 20-4-9-9-4 20-7Z" stroke-linejoin="round"/>
+                                    <path d="M22 2 11 13" stroke-linecap="round"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </form>
+                <p class="mt-2 text-center text-[11px] text-slate-600">回答来自校内知识库，重要信息请以学校官方通知为准</p>
+            </div>
+        </section>
+
+        <!-- 右侧快捷导航 -->
+        <aside class="scrollbar-thin space-y-4 lg:min-h-0 lg:overflow-y-auto lg:pr-1" aria-label="校园快捷服务">
+            <section class="glass-panel rounded-2xl p-4 sm:p-5">
+                <div class="mb-4 flex items-end justify-between">
+                    <div>
+                        <p class="text-[10px] font-medium uppercase tracking-[0.22em] text-campus-400/70">Quick Access</p>
+                        <h2 class="mt-1 text-base font-semibold text-campus-50">快捷导航</h2>
+                    </div>
+                    <svg class="h-5 w-5 text-slate-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+                        <rect x="3" y="3" width="7" height="7" rx="1.5"/>
+                        <rect x="14" y="3" width="7" height="7" rx="1.5"/>
+                        <rect x="3" y="14" width="7" height="7" rx="1.5"/>
+                        <rect x="14" y="14" width="7" height="7" rx="1.5"/>
+                    </svg>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <button type="button" data-open-map class="quick-card rounded-xl border border-campus-300/10 bg-white/[0.025] p-3.5 text-left sm:p-4">
+                        <span class="mb-4 flex h-9 w-9 items-center justify-center rounded-lg bg-campus-500/10 text-campus-400">
+                            <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+                                <path d="m9 18-6 3V6l6-3 6 3 6-3v15l-6 3-6-3Z" stroke-linejoin="round"/>
+                                <path d="M9 3v15M15 6v15" stroke-linecap="round"/>
+                            </svg>
+                        </span>
+                        <span class="relative z-[1] block text-sm font-medium text-slate-200">校园地图</span>
+                        <span class="relative z-[1] mt-1 block text-[11px] text-slate-500">建筑地点快速了解</span>
+                    </button>
+
+                    <button type="button" data-question="请介绍学校现行的主要规章制度。" class="quick-card rounded-xl border border-campus-300/10 bg-white/[0.025] p-3.5 text-left sm:p-4">
+                        <span class="mb-4 flex h-9 w-9 items-center justify-center rounded-lg bg-campus-500/10 text-campus-400">
+                            <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+                                <path d="M6 3h9l4 4v14H6V3Z" stroke-linejoin="round"/>
+                                <path d="M14 3v5h5M9 13h6M9 17h6" stroke-linecap="round"/>
+                            </svg>
+                        </span>
+                        <span class="relative z-[1] block text-sm font-medium text-slate-200">政策查询</span>
+                        <span class="relative z-[1] mt-1 block text-[11px] text-slate-500">规章制度权威解答</span>
+                    </button>
+
+                    <button type="button" data-question="新生入学需要了解哪些事项？" class="quick-card rounded-xl border border-campus-300/10 bg-white/[0.025] p-3.5 text-left sm:p-4">
+                        <span class="mb-4 flex h-9 w-9 items-center justify-center rounded-lg bg-campus-500/10 text-campus-400">
+                            <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+                                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5v14Z" stroke-linejoin="round"/>
+                                <path d="M8 7h8M8 11h6M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5" stroke-linecap="round"/>
+                            </svg>
+                        </span>
+                        <span class="relative z-[1] block text-sm font-medium text-slate-200">新生指南</span>
+                        <span class="relative z-[1] mt-1 block text-[11px] text-slate-500">报到入学一站掌握</span>
+                    </button>
+
+                    <button type="button" data-question="学校有哪些场馆？它们的开放时间是什么？" class="quick-card rounded-xl border border-campus-300/10 bg-white/[0.025] p-3.5 text-left sm:p-4">
+                        <span class="mb-4 flex h-9 w-9 items-center justify-center rounded-lg bg-campus-500/10 text-campus-400">
+                            <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+                                <path d="M3 21h18M5 21V9h14v12M3 9l9-6 9 6H3Z" stroke-linejoin="round"/>
+                                <path d="M9 21v-6h6v6M9 11h.01M15 11h.01" stroke-linecap="round"/>
+                            </svg>
+                        </span>
+                        <span class="relative z-[1] block text-sm font-medium text-slate-200">场馆信息</span>
+                        <span class="relative z-[1] mt-1 block text-[11px] text-slate-500">开放安排便捷查询</span>
+                    </button>
+                </div>
+            </section>
+
+            <section class="glass-panel rounded-2xl p-4 sm:p-5">
+                <div class="flex items-center gap-2">
+                    <svg class="h-4 w-4 text-campus-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                        <circle cx="12" cy="12" r="9"/>
+                        <path d="M12 11v5M12 8h.01" stroke-linecap="round"/>
+                    </svg>
+                    <h2 class="text-sm font-semibold text-slate-200">提问小贴士</h2>
+                </div>
+                <ul class="mt-3 space-y-2.5 text-xs leading-5 text-slate-500">
+                    <li class="flex gap-2"><span class="mt-2 h-1 w-1 shrink-0 rounded-full bg-campus-500"></span><span>描述具体问题，如“本科学生证遗失如何补办”。</span></li>
+                    <li class="flex gap-2"><span class="mt-2 h-1 w-1 shrink-0 rounded-full bg-campus-500"></span><span>带上时间、地点或业务名称，检索结果更准确。</span></li>
+                    <li class="flex gap-2"><span class="mt-2 h-1 w-1 shrink-0 rounded-full bg-campus-500"></span><span>未收录的问题会明确提示，不会虚构校内信息。</span></li>
+                </ul>
+            </section>
+
+            <div class="flex items-center justify-center gap-2 py-1 text-[11px] text-slate-600">
+                <span class="h-px w-6 bg-campus-300/10"></span>
+                智慧校园 · 绿色交大
+                <span class="h-px w-6 bg-campus-300/10"></span>
+            </div>
+        </aside>
+    </main>
+
+    <!-- 校园地图标签页，首次打开时初始化 Leaflet，避免隐藏容器尺寸异常。 -->
+    <main id="map-panel" role="tabpanel" aria-labelledby="map-tab" hidden class="relative z-[1] mx-auto w-full max-w-[1600px] p-4 sm:p-6 lg:h-[calc(100%-120px)] lg:min-h-0">
+        <section id="map-card" class="glass-panel flex h-[calc(100dvh-9rem)] min-h-[560px] flex-col overflow-hidden rounded-2xl shadow-glow lg:h-full" aria-label="华东交通大学南区校园地图">
+            <div class="flex flex-col gap-4 border-b border-campus-300/[0.08] px-4 py-4 sm:px-5 lg:flex-row lg:items-center lg:justify-between">
+                <div class="shrink-0">
+                    <div class="flex items-center gap-2.5">
+                        <h1 class="text-base font-semibold text-campus-50">校园地图</h1>
+                        <span id="map-point-count" class="rounded-full border border-campus-300/10 bg-campus-500/5 px-2 py-0.5 text-[10px] text-campus-300/70">点位加载中</span>
+                        <a href="/assets/campus-plan.jpg" target="_blank" rel="noopener noreferrer" class="rounded-full border border-campus-300/15 px-2 py-0.5 text-[10px] text-campus-300/80 transition hover:border-campus-300/40 hover:text-campus-200">官方平面图</a>
+                    </div>
+                    <p id="map-search-status" class="mt-1 text-xs text-slate-500" role="status">默认定位：华东交通大学南区</p>
+                </div>
+
+                <div class="flex min-w-0 items-center gap-2 lg:w-full lg:max-w-xl">
+                    <div class="relative min-w-0 flex-1">
+                        <svg class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4" stroke-linecap="round"/></svg>
+                        <label for="map-search" class="sr-only">搜索校园点位名称</label>
+                        <input id="map-search" type="search" list="map-search-suggestions" autocomplete="off" placeholder="输入点位名称，自动定位" disabled class="h-10 w-full rounded-xl border border-campus-300/15 bg-night-950/70 pl-9 pr-3 text-sm text-slate-200 placeholder:text-slate-600 disabled:cursor-not-allowed disabled:opacity-60">
+                        <datalist id="map-search-suggestions"></datalist>
+                    </div>
+                    <button id="map-search-button" type="button" disabled class="h-10 shrink-0 rounded-xl bg-campus-500 px-4 text-sm font-medium text-night-950 transition hover:bg-campus-400 disabled:cursor-not-allowed disabled:opacity-50">定位</button>
+                    <button id="map-fullscreen-button" type="button" title="进入全屏" aria-label="进入全屏" class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-campus-300/15 bg-campus-500/5 text-campus-300 transition hover:bg-campus-500/15">
+                        <svg id="fullscreen-enter-icon" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        <svg id="fullscreen-exit-icon" class="hidden h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 8h5V3M21 8h-5V3M8 21v-5H3M16 21v-5h5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </button>
+                </div>
+            </div>
+
+            <div id="map-wrapper" class="relative min-h-0 flex-1">
+                <div id="campus-map" class="absolute inset-0" aria-label="可缩放校园地图"></div>
+
+                <!-- 五类点位使用不同颜色，便于快速识别。 -->
+                <div class="pointer-events-none absolute bottom-5 left-3 z-[500] flex max-w-[calc(100%-6rem)] flex-wrap gap-x-3 gap-y-1.5 rounded-xl border border-campus-300/10 bg-night-950/85 px-3 py-2 text-[10px] text-slate-400 shadow-lg backdrop-blur-md sm:left-4 sm:text-xs">
+                    <span class="flex items-center gap-1.5"><i class="h-2 w-2 rounded-full bg-[#f59e0b]"></i>食堂</span>
+                    <span class="flex items-center gap-1.5"><i class="h-2 w-2 rounded-full bg-[#10b981]"></i>教学楼</span>
+                    <span class="flex items-center gap-1.5"><i class="h-2 w-2 rounded-full bg-[#38bdf8]"></i>场馆</span>
+                    <span class="flex items-center gap-1.5"><i class="h-2 w-2 rounded-full bg-[#a78bfa]"></i>宿舍</span>
+                    <span class="flex items-center gap-1.5"><i class="h-2 w-2 rounded-full bg-[#fb7185]"></i>快递点</span>
+                </div>
+
+                <div id="map-feedback" class="absolute inset-0 z-[600] flex items-center justify-center bg-night-900/75 p-6 backdrop-blur-sm">
+                    <div class="max-w-sm text-center">
+                        <div id="map-loading-spinner" class="mx-auto mb-4 flex items-center justify-center gap-1.5" aria-hidden="true"><span class="loading-dot"></span><span class="loading-dot"></span><span class="loading-dot"></span></div>
+                        <p id="map-feedback-text" class="text-sm leading-6 text-slate-400">正在加载校园点位</p>
+                        <button id="map-retry-button" type="button" hidden class="mt-4 rounded-lg border border-campus-300/20 bg-campus-500/10 px-4 py-2 text-xs text-campus-300 transition hover:bg-campus-500/20">重新加载</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // 原生 JavaScript 负责消息渲染、接口请求和输入交互。
+        (() => {
+            "use strict";
+
+            const ASK_API_URL = "/api/ask";
+            const REQUEST_TIMEOUT = 120000;
+            const chatMessages = document.getElementById("chat-messages");
+            const questionForm = document.getElementById("question-form");
+            const questionInput = document.getElementById("question-input");
+            const sendButton = document.getElementById("send-button");
+            const characterCount = document.getElementById("character-count");
+            let isLoading = false;
+
+            const assistantIcon = `
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                    <path d="M12 3 9.8 8.2 4 10l5.8 1.8L12 17l2.2-5.2L20 10l-5.8-1.8L12 3Z" stroke-linejoin="round"/>
+                </svg>`;
+
+            function scrollToLatest() {
+                chatMessages.scrollTo({ top: chatMessages.scrollHeight, behavior: "smooth" });
+            }
+
+            function createMessageShell(isUser) {
+                const article = document.createElement("article");
+                article.className = `message-enter flex gap-3 ${isUser ? "justify-end" : ""}`;
+
+                if (!isUser) {
+                    const avatar = document.createElement("div");
+                    avatar.className = "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-campus-300/15 bg-campus-500/10 text-campus-400";
+                    avatar.innerHTML = assistantIcon;
+                    article.appendChild(avatar);
+                }
+
+                const content = document.createElement("div");
+                content.className = isUser ? "max-w-[85%] sm:max-w-[75%]" : "max-w-[88%] sm:max-w-[82%]";
+                article.appendChild(content);
+                chatMessages.appendChild(article);
+                return content;
+            }
+
+            function renderMarkdown(markdown) {
+                if (window.marked && window.DOMPurify) {
+                    window.marked.setOptions({ gfm: true, breaks: true });
+                    return window.DOMPurify.sanitize(window.marked.parse(markdown), {
+                        USE_PROFILES: { html: true }
+                    });
+                }
+
+                // CDN 不可用时退化为安全纯文本，保证答案仍然可读。
+                const container = document.createElement("div");
+                container.textContent = markdown;
+                return container.innerHTML.replace(/\n/g, "<br>");
+            }
+
+            function appendUserMessage(text) {
+                const content = createMessageShell(true);
+                const bubble = document.createElement("div");
+                bubble.className = "whitespace-pre-wrap break-words rounded-2xl rounded-tr-md border border-campus-300/20 bg-campus-600/85 px-4 py-3 text-sm leading-6 text-campus-50 shadow-lg shadow-campus-900/10";
+                bubble.textContent = text;
+                content.appendChild(bubble);
+                scrollToLatest();
+            }
+
+            function appendSources(container, sources) {
+                if (!Array.isArray(sources) || sources.length === 0) return;
+
+                const details = document.createElement("details");
+                details.className = "mt-2 rounded-xl border border-campus-300/[0.08] bg-black/10 px-3 py-2 text-xs";
+                const summary = document.createElement("summary");
+                summary.className = "cursor-pointer select-none text-campus-300/70 hover:text-campus-300";
+                summary.textContent = `参考校内资料（${sources.length}）`;
+                details.appendChild(summary);
+
+                const list = document.createElement("div");
+                list.className = "mt-2 space-y-2 border-t border-campus-300/[0.08] pt-2";
+                sources.forEach((source, index) => {
+                    const item = document.createElement("div");
+                    item.className = "rounded-lg bg-white/[0.025] p-2.5";
+
+                    const title = document.createElement("p");
+                    title.className = "font-medium text-slate-400";
+                    const filename = source?.metadata?.source || `资料 ${index + 1}`;
+                    title.textContent = `${index + 1}. ${filename}`;
+
+                    const excerpt = document.createElement("p");
+                    excerpt.className = "mt-1 whitespace-pre-wrap break-words leading-5 text-slate-600";
+                    excerpt.textContent = typeof source?.content === "string" ? source.content : "";
+                    item.append(title, excerpt);
+                    list.appendChild(item);
+                });
+                details.appendChild(list);
+                container.appendChild(details);
+            }
+
+            function appendAssistantMessage(answer, sources = []) {
+                const content = createMessageShell(false);
+                const bubble = document.createElement("div");
+                bubble.className = "rounded-2xl rounded-tl-md border border-campus-300/[0.08] bg-white/[0.035] px-4 py-3.5";
+
+                const markdown = document.createElement("div");
+                markdown.className = "markdown-body";
+                markdown.innerHTML = renderMarkdown(answer);
+                markdown.querySelectorAll("a").forEach((link) => {
+                    link.target = "_blank";
+                    link.rel = "noopener noreferrer";
+                });
+
+                bubble.appendChild(markdown);
+                content.appendChild(bubble);
+                appendSources(content, sources);
+                scrollToLatest();
+            }
+
+            function appendLoadingMessage() {
+                const content = createMessageShell(false);
+                content.id = "loading-message";
+                const bubble = document.createElement("div");
+                bubble.className = "flex items-center gap-3 rounded-2xl rounded-tl-md border border-campus-300/[0.08] bg-white/[0.035] px-4 py-4";
+                bubble.innerHTML = `
+                    <div class="flex items-center gap-1" aria-hidden="true">
+                        <span class="loading-dot"></span><span class="loading-dot"></span><span class="loading-dot"></span>
+                    </div>
+                    <span class="text-xs text-slate-500">正在检索校内资料并生成回答</span>`;
+                content.appendChild(bubble);
+                scrollToLatest();
+            }
+
+            function removeLoadingMessage() {
+                document.getElementById("loading-message")?.remove();
+            }
+
+            function appendErrorMessage(message) {
+                const content = createMessageShell(false);
+                const bubble = document.createElement("div");
+                bubble.className = "rounded-2xl rounded-tl-md border border-amber-400/15 bg-amber-400/[0.045] px-4 py-3.5";
+                bubble.innerHTML = `
+                    <div class="flex items-start gap-2.5">
+                        <svg class="mt-0.5 h-4 w-4 shrink-0 text-amber-300/80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                            <circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 17h.01" stroke-linecap="round"/>
+                        </svg>
+                        <div><p class="text-sm font-medium text-amber-100/90">暂时无法回答</p><p class="error-detail mt-1 text-xs leading-5 text-slate-500"></p></div>
+                    </div>`;
+                bubble.querySelector(".error-detail").textContent = message;
+                content.appendChild(bubble);
+                scrollToLatest();
+            }
+
+            function updateInputState() {
+                const length = questionInput.value.length;
+                characterCount.textContent = `${length} / 2000`;
+                questionInput.style.height = "auto";
+                questionInput.style.height = `${Math.min(questionInput.scrollHeight, 144)}px`;
+                sendButton.disabled = isLoading || !questionInput.value.trim();
+            }
+
+            function setLoading(loading) {
+                isLoading = loading;
+                questionInput.readOnly = loading;
+                document.querySelectorAll("[data-question]").forEach((button) => {
+                    button.disabled = loading;
+                });
+                updateInputState();
+            }
+
+            function friendlyError(error) {
+                if (error.name === "AbortError") {
+                    return "本次回答等待时间较长，请稍后重试或缩短问题。";
+                }
+                if (error instanceof TypeError) {
+                    return "无法连接校园服务，请检查网络或确认后端服务已启动。";
+                }
+                return error.message || "校园服务暂时繁忙，请稍后再试。";
+            }
+
+            async function askQuestion(rawQuestion) {
+                const question = rawQuestion.trim();
+                if (!question || isLoading) return;
+
+                appendUserMessage(question);
+                questionInput.value = "";
+                updateInputState();
+                setLoading(true);
+                appendLoadingMessage();
+
+                const controller = new AbortController();
+                const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
+
+                try {
+                    const response = await fetch(ASK_API_URL, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ question }),
+                        signal: controller.signal
+                    });
+                    const data = await response.json().catch(() => null);
+
+                    if (!response.ok) {
+                        // 优先展示后端返回的具体原因（如配置缺失），避免 5xx 时丢失诊断信息。
+                        const message = data?.detail
+                            || (response.status >= 500
+                                ? "校园知识服务暂时不可用，请稍后重试。"
+                                : "问题提交失败，请调整内容后重试。");
+                        throw new Error(message);
+                    }
+                    if (!data || typeof data.answer !== "string" || !data.answer.trim()) {
+                        throw new Error("服务返回的内容不完整，请稍后重试。");
+                    }
+
+                    removeLoadingMessage();
+                    appendAssistantMessage(data.answer, data.sources);
+                } catch (error) {
+                    removeLoadingMessage();
+                    appendErrorMessage(friendlyError(error));
+                } finally {
+                    window.clearTimeout(timeout);
+                    setLoading(false);
+                    questionInput.focus();
+                }
+            }
+
+            questionForm.addEventListener("submit", (event) => {
+                event.preventDefault();
+                askQuestion(questionInput.value);
+            });
+
+            questionInput.addEventListener("input", updateInputState);
+            questionInput.addEventListener("keydown", (event) => {
+                if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+                    event.preventDefault();
+                    askQuestion(questionInput.value);
+                }
+            });
+
+            // 快捷导航和推荐问题统一复用问答流程。
+            document.addEventListener("click", (event) => {
+                const button = event.target.closest("[data-question]");
+                if (button && !button.disabled) {
+                    askQuestion(button.dataset.question || "");
+                }
+            });
+
+            updateInputState();
+            questionInput.focus();
+        })();
+    </script>
+
+    <script>
+        // 校园地图模块：标签切换、Leaflet 点位、搜索定位与全屏控制。
+        (() => {
+            "use strict";
+
+            // 直接双击 HTML 时请求本地后端；通过网站访问时使用同源 API。
+            const API_ORIGIN = window.location.protocol === "file:" ? "http://127.0.0.1:8000" : "";
+            const MAP_POINTS_URL = `${API_ORIGIN}/api/map/points`;
+            const CAMPUS_CENTER = [28.7391, 115.8657];
+            const POINT_TYPES = {
+                "食堂": {
+                    color: "#f59e0b",
+                    icon: '<path d="M3 2v7c0 1.7 1.3 3 3 3s3-1.3 3-3V2M6 2v20M15 2v8h6M18 2v20" stroke-linecap="round" stroke-linejoin="round"/>'
+                },
+                "教学楼": {
+                    color: "#10b981",
+                    icon: '<path d="M4 21V5l8-3 8 3v16M2 21h20M8 8h2M14 8h2M8 12h2M14 12h2M10 21v-5h4v5" stroke-linecap="round" stroke-linejoin="round"/>'
+                },
+                "学院楼": {
+                    color: "#14b8a6",
+                    icon: '<path d="M4 21V6h16v15M2 21h20M9 21v-4h6v4M8 10h2M14 10h2M8 14h2M14 14h2" stroke-linecap="round" stroke-linejoin="round"/>'
+                },
+                "停车点": {
+                    color: "#f43f5e",
+                    icon: '<rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 17V7h4a3 3 0 0 1 0 6H9" stroke-linecap="round" stroke-linejoin="round"/>'
+                },
+                "场馆": {
+                    color: "#38bdf8",
+                    icon: '<path d="M3 21h18M5 21V9h14v12M3 9l9-6 9 6M9 13h6M9 17h6" stroke-linecap="round" stroke-linejoin="round"/>'
+                },
+                "宿舍": {
+                    color: "#a78bfa",
+                    icon: '<path d="M3 4v16M21 20v-8a2 2 0 0 0-2-2H3v6h18M7 10V6h5a2 2 0 0 1 2 2v2" stroke-linecap="round" stroke-linejoin="round"/>'
+                },
+                "快递点": {
+                    color: "#ec4899",
+                    icon: '<path d="m21 8-9-5-9 5 9 5 9-5ZM3 8v8l9 5 9-5V8M12 13v8" stroke-linecap="round" stroke-linejoin="round"/>'
+                },
+                "其他": {
+                    color: "#94a3b8",
+                    icon: '<path d="M12 21s7-5 7-11a7 7 0 1 0-14 0c0 6 7 11 7 11Z" stroke-linejoin="round"/><circle cx="12" cy="10" r="2"/>'
+                }
+            };
+
+            const chatPanel = document.getElementById("chat-panel");
+            const mapPanel = document.getElementById("map-panel");
+            const mapCard = document.getElementById("map-card");
+            const mapSearch = document.getElementById("map-search");
+            const mapSearchButton = document.getElementById("map-search-button");
+            const mapSearchStatus = document.getElementById("map-search-status");
+            const mapPointCount = document.getElementById("map-point-count");
+            const mapSuggestions = document.getElementById("map-search-suggestions");
+            const mapFeedback = document.getElementById("map-feedback");
+            const mapFeedbackText = document.getElementById("map-feedback-text");
+            const mapLoadingSpinner = document.getElementById("map-loading-spinner");
+            const mapRetryButton = document.getElementById("map-retry-button");
+            const fullscreenButton = document.getElementById("map-fullscreen-button");
+            const fullscreenEnterIcon = document.getElementById("fullscreen-enter-icon");
+            const fullscreenExitIcon = document.getElementById("fullscreen-exit-icon");
+            const tabButtons = Array.from(document.querySelectorAll("[data-tab]"));
+
+            let campusMap = null;
+            let pointsLayer = null;
+            let pointRecords = [];
+            let pointsRequest = null;
+            let pointsLoaded = false;
+            let activeMarker = null;
+            let searchTimer = null;
+            let fallbackFullscreen = false;
+
+            function getPointStyle(type) {
+                const value = String(type || "其他");
+                const matchedType = Object.keys(POINT_TYPES).find((name) => name !== "其他" && value.includes(name));
+                return POINT_TYPES[matchedType || "其他"];
+            }
+
+            function createMarkerIcon(type) {
+                const style = getPointStyle(type);
+                return window.L.divIcon({
+                    className: "campus-div-icon",
+                    html: `<div class="marker-pin" style="--marker-color:${style.color}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">${style.icon}</svg></div>`,
+                    iconSize: [38, 44],
+                    iconAnchor: [19, 40],
+                    popupAnchor: [0, -40]
+                });
+            }
+
+            function appendPopupDetail(container, label, value) {
+                const row = document.createElement("p");
+                row.className = "mt-2 text-xs leading-5 text-slate-400";
+                const caption = document.createElement("span");
+                caption.className = "mr-1.5 text-slate-500";
+                caption.textContent = `${label}：`;
+                const content = document.createElement("span");
+                content.textContent = value || "暂未提供";
+                row.append(caption, content);
+                container.appendChild(row);
+            }
+
+            function createPopupContent(point) {
+                const container = document.createElement("div");
+                const header = document.createElement("div");
+                header.className = "flex items-start justify-between gap-3";
+
+                const title = document.createElement("h3");
+                title.className = "text-sm font-semibold leading-6 text-campus-50";
+                title.textContent = point.name;
+                const badge = document.createElement("span");
+                badge.className = "shrink-0 rounded-full border px-2 py-0.5 text-[10px]";
+                badge.style.color = getPointStyle(point.type).color;
+                badge.style.borderColor = `${getPointStyle(point.type).color}55`;
+                badge.textContent = point.type || "其他";
+                header.append(title, badge);
+                container.appendChild(header);
+
+                appendPopupDetail(container, "开放时间", point.opening_hours);
+                appendPopupDetail(container, "详细描述", point.description);
+                appendPopupDetail(container, "地址", point.address);
+                return container;
+            }
+
+            function setMapFeedback(state, message = "") {
+                mapFeedback.hidden = state === "success";
+                mapLoadingSpinner.hidden = state !== "loading";
+                mapRetryButton.hidden = state !== "error";
+                mapFeedbackText.textContent = message || (state === "loading" ? "正在加载校园点位" : "");
+            }
+
+            // WGS84 转 GCJ-02：高德底图使用火星坐标系，不转换会导致点位偏移数百米。
+            const GCJ_A = 6378245.0;
+            const GCJ_EE = 0.00669342162296594323;
+
+            function transformLat(x, y) {
+                let ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x));
+                ret += (20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2.0 / 3.0;
+                ret += (20.0 * Math.sin(y * Math.PI) + 40.0 * Math.sin(y / 3.0 * Math.PI)) * 2.0 / 3.0;
+                ret += (160.0 * Math.sin(y / 12.0 * Math.PI) + 320.0 * Math.sin(y * Math.PI / 30.0)) * 2.0 / 3.0;
+                return ret;
+            }
+
+            function transformLng(x, y) {
+                let ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x));
+                ret += (20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2.0 / 3.0;
+                ret += (20.0 * Math.sin(x * Math.PI) + 40.0 * Math.sin(x / 3.0 * Math.PI)) * 2.0 / 3.0;
+                ret += (150.0 * Math.sin(x / 12.0 * Math.PI) + 300.0 * Math.sin(x / 30.0 * Math.PI)) * 2.0 / 3.0;
+                return ret;
+            }
+
+            function wgs84ToGcj02(latitude, longitude) {
+                // 中国境外坐标无需偏移
+                if (longitude < 72.004 || longitude > 137.8347 || latitude < 0.8293 || latitude > 55.8271) {
+                    return [latitude, longitude];
+                }
+                let dLat = transformLat(longitude - 105.0, latitude - 35.0);
+                let dLng = transformLng(longitude - 105.0, latitude - 35.0);
+                const radLat = latitude / 180.0 * Math.PI;
+                let magic = Math.sin(radLat);
+                magic = 1 - GCJ_EE * magic * magic;
+                const sqrtMagic = Math.sqrt(magic);
+                dLat = (dLat * 180.0) / ((GCJ_A * (1 - GCJ_EE)) / (magic * sqrtMagic) * Math.PI);
+                dLng = (dLng * 180.0) / (GCJ_A / sqrtMagic * Math.cos(radLat) * Math.PI);
+                return [latitude + dLat, longitude + dLng];
+            }
+
+            function initializeMap() {
+                if (campusMap) return true;
+                if (!window.L) {
+                    setMapFeedback("error", "Leaflet 地图组件加载失败，请检查网络后重试。");
+                    return false;
+                }
+
+                campusMap = window.L.map("campus-map", {
+                    zoomControl: false,
+                    preferCanvas: true
+                }).setView(wgs84ToGcj02(CAMPUS_CENTER[0], CAMPUS_CENTER[1]), 16);
+
+                // 使用高德瓦片：国内网络可达性优于 OpenStreetMap。
+                window.L.tileLayer("https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}", {
+                    subdomains: ["1", "2", "3", "4"],
+                    maxZoom: 18,
+                    attribution: '&copy; <a href="https://www.amap.com/" target="_blank" rel="noopener noreferrer">高德地图</a>'
+                }).addTo(campusMap);
+                window.L.control.zoom({ position: "bottomright" }).addTo(campusMap);
+                pointsLayer = window.L.featureGroup().addTo(campusMap);
+                window.requestAnimationFrame(() => campusMap.invalidateSize());
+                return true;
+            }
+
+            function clearMarkerHighlight() {
+                if (!activeMarker) return;
+                activeMarker.getElement()?.classList.remove("marker-highlight");
+                activeMarker.setZIndexOffset(0);
+                activeMarker = null;
+            }
+
+            function focusPoint(record) {
+                clearMarkerHighlight();
+                activeMarker = record.marker;
+                activeMarker.getElement()?.classList.add("marker-highlight");
+                activeMarker.setZIndexOffset(1000);
+                campusMap.flyTo([record.latitude, record.longitude], Math.max(campusMap.getZoom(), 17), { duration: 0.8 });
+                activeMarker.openPopup();
+                mapSearchStatus.textContent = `已定位：${record.point.name}`;
+            }
+
+            function searchPoint() {
+                const query = mapSearch.value.trim().toLowerCase();
+                if (!query) {
+                    clearMarkerHighlight();
+                    mapSearchStatus.textContent = "默认定位：华东交通大学南区";
+                    return;
+                }
+
+                // 优先精确匹配，其次匹配名称中包含关键词的第一个点位。
+                const record = pointRecords.find((item) => item.point.name.toLowerCase() === query)
+                    || pointRecords.find((item) => item.point.name.toLowerCase().includes(query));
+                if (record) {
+                    focusPoint(record);
+                } else {
+                    clearMarkerHighlight();
+                    mapSearchStatus.textContent = `未找到“${mapSearch.value.trim()}”，请尝试其他名称。`;
+                }
+            }
+
+            function addPointToMap(point) {
+                if (!point || typeof point.name !== "string" || !point.name.trim()) return;
+                const latitude = Number(point.latitude);
+                const longitude = Number(point.longitude);
+                if (!Number.isFinite(latitude) || !Number.isFinite(longitude)
+                    || Math.abs(latitude) > 90 || Math.abs(longitude) > 180) {
+                    console.warn("跳过经纬度无效的校园点位：", point.name);
+                    return;
+                }
+
+                const [markerLatitude, markerLongitude] = wgs84ToGcj02(latitude, longitude);
+                const marker = window.L.marker([markerLatitude, markerLongitude], {
+                    icon: createMarkerIcon(point.type),
+                    title: point.name,
+                    alt: `${point.name}地图标记`,
+                    riseOnHover: true
+                });
+                marker.bindPopup(createPopupContent(point), { maxWidth: 300 });
+                const record = { point, marker, latitude: markerLatitude, longitude: markerLongitude };
+                marker.on("click", () => {
+                    focusPoint(record);
+                });
+                marker.addTo(pointsLayer);
+                pointRecords.push(record);
+            }
+
+            async function loadCampusPoints(forceReload = false) {
+                if (pointsRequest) return pointsRequest;
+                if (pointsLoaded && !forceReload) return;
+                if (!initializeMap()) return;
+
+                setMapFeedback("loading");
+                mapSearch.disabled = true;
+                mapSearchButton.disabled = true;
+                mapPointCount.textContent = "点位加载中";
+                const controller = new AbortController();
+                const timeout = window.setTimeout(() => controller.abort(), 15000);
+
+                pointsRequest = (async () => {
+                    try {
+                        const response = await fetch(MAP_POINTS_URL, { signal: controller.signal });
+                        const points = await response.json().catch(() => null);
+                        if (!response.ok) throw new Error("点位接口请求失败");
+                        if (!Array.isArray(points)) throw new Error("点位接口数据格式无效");
+
+                        pointsLayer.clearLayers();
+                        pointRecords = [];
+                        activeMarker = null;
+                        mapSuggestions.replaceChildren();
+                        points.forEach(addPointToMap);
+                        pointRecords.forEach(({ point }) => {
+                            const option = document.createElement("option");
+                            option.value = point.name;
+                            mapSuggestions.appendChild(option);
+                        });
+
+                        pointsLoaded = true;
+                        mapPointCount.textContent = `${pointRecords.length} 个点位`;
+                        mapSearchStatus.textContent = pointRecords.length
+                            ? "输入点位名称即可自动定位并高亮"
+                            : "暂未收录校园点位";
+                        mapSearch.disabled = pointRecords.length === 0;
+                        mapSearchButton.disabled = pointRecords.length === 0;
+                        // 首次加载后自动缩放，让南北区点位同时进入视野。
+                        if (pointRecords.length) {
+                            campusMap.invalidateSize();
+                            campusMap.fitBounds(pointsLayer.getBounds(), { padding: [28, 28], maxZoom: 16 });
+                        }
+                        setMapFeedback("success");
+                    } catch (error) {
+                        pointsLoaded = false;
+                        mapPointCount.textContent = "加载失败";
+                        mapSearchStatus.textContent = "点位加载失败，请稍后重试";
+                        const message = error.name === "AbortError"
+                            ? "校园点位请求超时，请检查服务后重试。"
+                            : "无法获取校园点位，请确认后端服务已启动并检查网络。";
+                        setMapFeedback("error", message);
+                    } finally {
+                        window.clearTimeout(timeout);
+                        pointsRequest = null;
+                    }
+                })();
+
+                return pointsRequest;
+            }
+
+            function activateTab(tabName) {
+                tabButtons.forEach((button) => {
+                    const selected = button.dataset.tab === tabName;
+                    button.setAttribute("aria-selected", String(selected));
+                    button.tabIndex = selected ? 0 : -1;
+                });
+                chatPanel.hidden = tabName !== "chat";
+                mapPanel.hidden = tabName !== "map";
+
+                if (tabName === "map") {
+                    if (!initializeMap()) return;
+                    window.requestAnimationFrame(() => campusMap.invalidateSize());
+                    loadCampusPoints();
+                }
+            }
+
+            function isMapFullscreen() {
+                return document.fullscreenElement === mapCard || fallbackFullscreen;
+            }
+
+            function updateFullscreenControl() {
+                // 原生全屏若延迟成功，退出备用模式，避免两种状态叠加。
+                if (document.fullscreenElement === mapCard && fallbackFullscreen) {
+                    fallbackFullscreen = false;
+                    mapCard.classList.remove("map-fullscreen-fallback");
+                    document.body.style.overflow = "";
+                }
+                const active = isMapFullscreen();
+                fullscreenEnterIcon.classList.toggle("hidden", active);
+                fullscreenExitIcon.classList.toggle("hidden", !active);
+                fullscreenButton.title = active ? "退出全屏" : "进入全屏";
+                fullscreenButton.setAttribute("aria-label", fullscreenButton.title);
+                window.requestAnimationFrame(() => campusMap?.invalidateSize());
+            }
+
+            function setFallbackFullscreen(enabled) {
+                fallbackFullscreen = enabled;
+                mapCard.classList.toggle("map-fullscreen-fallback", enabled);
+                document.body.style.overflow = enabled ? "hidden" : "";
+                updateFullscreenControl();
+            }
+
+            async function toggleFullscreen() {
+                if (document.fullscreenElement === mapCard) {
+                    await document.exitFullscreen();
+                    return;
+                }
+                if (fallbackFullscreen) {
+                    setFallbackFullscreen(false);
+                    return;
+                }
+
+                try {
+                    if (!mapCard.requestFullscreen) throw new Error("浏览器不支持 Fullscreen API");
+                    const request = mapCard.requestFullscreen();
+                    if (request && typeof request.catch === "function") {
+                        request.catch(() => setFallbackFullscreen(true));
+                    }
+                    // 部分嵌入式浏览器不拒绝但也不完成请求，超时后启用备用全屏。
+                    window.setTimeout(() => {
+                        if (!document.fullscreenElement && !fallbackFullscreen) {
+                            setFallbackFullscreen(true);
+                        }
+                    }, 800);
+                } catch (error) {
+                    // 不支持或拒绝全屏权限时，使用固定定位实现同等效果。
+                    setFallbackFullscreen(true);
+                }
+            }
+
+            tabButtons.forEach((button, index) => {
+                button.addEventListener("click", () => activateTab(button.dataset.tab));
+                button.addEventListener("keydown", (event) => {
+                    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+                    event.preventDefault();
+                    const direction = event.key === "ArrowRight" ? 1 : -1;
+                    const nextButton = tabButtons[(index + direction + tabButtons.length) % tabButtons.length];
+                    activateTab(nextButton.dataset.tab);
+                    nextButton.focus();
+                });
+            });
+
+            document.querySelectorAll("[data-open-map]").forEach((button) => {
+                button.addEventListener("click", () => activateTab("map"));
+            });
+            mapSearch.addEventListener("input", () => {
+                window.clearTimeout(searchTimer);
+                searchTimer = window.setTimeout(searchPoint, 300);
+            });
+            mapSearch.addEventListener("keydown", (event) => {
+                if (event.key === "Enter" && !event.isComposing) {
+                    event.preventDefault();
+                    window.clearTimeout(searchTimer);
+                    searchPoint();
+                }
+            });
+            mapSearchButton.addEventListener("click", searchPoint);
+            mapRetryButton.addEventListener("click", () => loadCampusPoints(true));
+            fullscreenButton.addEventListener("click", toggleFullscreen);
+            document.addEventListener("fullscreenchange", updateFullscreenControl);
+            document.addEventListener("keydown", (event) => {
+                if (event.key === "Escape" && fallbackFullscreen) setFallbackFullscreen(false);
+            });
+            window.addEventListener("resize", () => campusMap?.invalidateSize());
+        })();
+    </script>
+</body>
+</html>

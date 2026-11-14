@@ -1,0 +1,4 @@
+/* 项目级自定义样式；组件样式优先使用 Tailwind CSS 工具类。 */
+:root {
+    color-scheme: light;
+}
